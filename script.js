@@ -31,64 +31,25 @@ let canvasHeight = box.height;
 
 const matchData = [{
   imageId: 'star',
-  prizeId: '5up',
-  midpoint: 64
+  prizeId: '5up'
 }, {
   imageId: 'mushroom',
-  prizeId: '2up',
-  midpoint: -64
+  prizeId: '2up'
 }, {
   imageId: 'flower',
-  prizeId: '3up',
-  midpoint: -192
+  prizeId: '3up'
 }, {
   imageId: 'mushroom',
-  prizeId: '2up',
-  midpoint: -320
-}, {
-  imageId: 'star',
-  prizeId: '5up',
-  midpoint: -448
-}, {
-  imageId: 'mushroom',
-  prizeId: '2up',
-  midpoint: -576
-}, {
-  imageId: 'flower',
-  prizeId: '3up',
-  midpoint: -704
-}, {
-  imageId: 'mushroom',
-  prizeId: '2up',
-  midpoint: -832
-}, {
-  imageId: 'star',
-  prizeId: '5up',
-  midpoint: -832
-}, {
-  imageId: 'mushroom',
-  prizeId: '2up',
-  midpoint: -832
-}, {
-  imageId: 'flower',
-  prizeId: '3up',
-  midpoint: -832
-}, {
-  imageId: 'mushroom',
-  prizeId: '2up',
-  midpoint: -832
+  prizeId: '2up'
 }];
 
 const RESET_POSITION = -576; // -1 * (512 + 64)
 const ROW_START_SPEEDS = [-.16, .16, -.24];
-//const ROW_START_SPEEDS = [-.01, .01, -.015];
-const ROW_START_OFFSETS = [RESET_POSITION, RESET_POSITION, RESET_POSITION];
+const ROW_START_OFFSETS = [0, 0, 0];
 
-const SMALLEST_MIDPOINT = 64;
+const RENDER_OFFSET = -64;
 const IMAGE_OFFSET = 128;
-const RESET_AMOUNT = IMAGE_OFFSET * 4;
-const NEGATIVE_EDGE = -1088; // -1 * (512 * 2) - 64
-const POSITIVE_EDGE = -64;
+const REPEAT_SIZE = IMAGE_OFFSET * 4;
 
 const SLOWING_SPEED_MULT = .5;
 const SHAKE_TIME_MS = 500;
@@ -153,6 +114,15 @@ Promise.all(loadingPromises).then(() => {
 });
 
 function startup() {
+  console.log('Starting');
+
+  for (let match of matchData) {
+    match.image = imageMap.get(match.imageId);
+    match.prize = imageMap.get(match.prizeId);
+  }
+  
+  currentGameHandler = new InteractiveGameHandler();
+
   document.getElementById('pressSpace').style.display = 'none';
   resizeCanvas();
   window.requestAnimationFrame(gameRender);
@@ -269,10 +239,16 @@ class InteractiveGameHandler {
 
     for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
       const rowOffset = rowOffsets[rowIndex];
+      const rowModOffset = rowOffset % REPEAT_SIZE;
 
-      for (let matchIndex = 0; matchIndex < matchData.length; matchIndex++) {
-        const imageOffset = IMAGE_OFFSET * matchIndex;
-        paintImageSegment(matchData[matchIndex].image, rowIndex, rowOffset + imageOffset);
+      // The idea here is to repeat the rendering to ensure there is always something on screen.
+      // We could be slightly more efficient with the different directions to cut one loop.
+      for (let renderRep = -1; renderRep <= 1; renderRep++) {
+        for (let matchIndex = 0; matchIndex < matchData.length; matchIndex++) {
+          const beforeOffset = rowModOffset + (renderRep * REPEAT_SIZE) + RENDER_OFFSET;
+          const imageOffset = IMAGE_OFFSET * matchIndex;
+          paintImageSegment(matchData[matchIndex].image, rowIndex, beforeOffset + imageOffset);
+        }
       }
     }
 
@@ -284,12 +260,6 @@ class InteractiveGameHandler {
     for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
       let newOffset = rowOffsets[rowIndex];
       newOffset += (rowSpeeds[rowIndex] * timePassed);
-
-      if (newOffset < NEGATIVE_EDGE) {
-        newOffset = RESET_POSITION;
-      } else if (newOffset > POSITIVE_EDGE) {
-        newOffset = RESET_POSITION;
-      }
       rowOffsets[rowIndex] = newOffset;
     }
 
@@ -323,36 +293,21 @@ class InteractiveGameHandler {
     rowSpeeds[currentRowIndex] *= SLOWING_SPEED_MULT;
 
     // determine the midpoint where we want to stop, and store the match data
-    const rowOffset = rowOffsets[currentRowIndex];
+
+    const rowOffset = (rowOffsets[currentRowIndex] + RENDER_OFFSET) % REPEAT_SIZE;
 
     if (rowSpeeds[currentRowIndex] < 0) { // If moving left
-      let prevIndex = Math.floor(rowOffset / IMAGE_OFFSET) + matchData.length;
-      let prevOffset = -1 * (prevIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+      const nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
+      const rowBase = rowOffsets[currentRowIndex] - (rowOffsets[currentRowIndex] % REPEAT_SIZE);
+      const nextOffset = nextIndex * IMAGE_OFFSET + rowBase;
 
-      if (rowOffset - prevOffset < 64) {
-        prevIndex--;
-        prevOffset = -1 * (prevIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
-      }
-
-      if (prevOffset < NEGATIVE_EDGE) {
-        prevIndex += 4;
-        prevOffset = -1 * (prevIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
-      }
-      slowDestination = prevOffset;
-      rowMatches[currentRowIndex] = matchData[prevIndex];
+      slowDestination = nextOffset;
+      rowMatches[currentRowIndex] = matchData[nextIndex];
     } else {
-      let nextIndex = Math.ceil(rowOffset / IMAGE_OFFSET) + matchData.length;
-      let nextOffset = -1 * (nextIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+      const nextIndex = Math.ceil(rowOffset / IMAGE_OFFSET); // negative index
+      const rowBase = rowOffsets[currentRowIndex] - (rowOffsets[currentRowIndex] % REPEAT_SIZE);
+      const nextOffset = nextIndex * IMAGE_OFFSET + rowBase;
 
-      if (nextOffset - rowOffset < 64) {
-        nextIndex++;
-        nextOffset = -1 * (nextIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
-      }
-
-      if (nextOffset > POSITIVE_EDGE) {
-        prevIndex -= 4;
-        nextOffset = -1 * (nextIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
-      }
       slowDestination = nextOffset;
       rowMatches[currentRowIndex] = matchData[nextIndex];
     }
@@ -375,11 +330,3 @@ function gameRender(newTimestamp) {
     window.requestAnimationFrame(gameRender);
   }
 }
-
-for (let match of matchData) {
-  match.image = imageMap.get(match.imageId);
-  match.prize = imageMap.get(match.prizeId);
-}
-
-currentGameHandler = new InteractiveGameHandler();
-resizeCanvas();
