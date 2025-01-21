@@ -36,13 +36,15 @@ const STATE = {
   PRIZE: 'PRIZE',
 };
 
+const RESET_POSITION = -1 * (512 + 64);
 const PRIZES = ['5up', '2up', '3up', '2up'];
-const ROW_START_SPEEDS = [-1, 1, -1.1];
-const ROW_START_OFFSETS = [-64, -64, -64];
+const ROW_START_SPEEDS = [-.16, .16, -.24];
+//const ROW_START_SPEEDS = [-.01, .01, -.015];
+const ROW_START_OFFSETS = [RESET_POSITION, RESET_POSITION, RESET_POSITION];
 
-const IMAGE_OFFSETS = [0, 128, 256, 384];
-const NEGATIVE_EDGE = -96;
-const POSITIVE_EDGE = 0;
+const IMAGE_OFFSET = 128;
+const NEGATIVE_EDGE = -1 * (512 * 2) - 64;
+const POSITIVE_EDGE = -64;
 
 let lastTimestamp = null;
 let currentGameHandler = null;
@@ -204,7 +206,7 @@ function paintImageSegment(image, rowIndex, rowOffset) {
 }
 
 class InteractiveGameHandler {
-  render(_timePassed) {
+  render() {
     ctx.fillStyle = '000';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
   
@@ -215,23 +217,47 @@ class InteractiveGameHandler {
     const flower = imageMap.get('flower');
     const star = imageMap.get('star');
 
+    // To make the logic easier, we repeat the images three times to allow easier looping
     const images = [
       star,
       mushroom,
       flower,
-      mushroom
+      mushroom,
+      star,
+      mushroom,
+      flower,
+      mushroom,
+      star,
+      mushroom,
+      flower,
+      mushroom,
     ];
 
-    for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
-      const rowOffset = rowOffsets[imageIndex];
-      for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
-        const imageOffset = IMAGE_OFFSETS[imageIndex];
+    for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
+      const rowOffset = rowOffsets[rowIndex];
+
+      for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
+        const imageOffset = IMAGE_OFFSET * imageIndex;
         paintImageSegment(images[imageIndex], rowIndex, rowOffset + imageOffset);
       }
     }
 
     const border = imageMap.get('border');
     ctx.drawImage(border, 0, 0, canvasWidth, canvasHeight);
+  }
+
+  updateState(timePassed) {
+    for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
+      let newOffset = rowOffsets[rowIndex];
+      newOffset += (rowSpeeds[rowIndex] * timePassed);
+
+      if (newOffset < NEGATIVE_EDGE) {
+        newOffset = RESET_POSITION;
+      } else if (newOffset > POSITIVE_EDGE) {
+        newOffset = RESET_POSITION;
+      }
+      rowOffsets[rowIndex] = newOffset;
+    }
   }
 
   click(e) {
@@ -243,8 +269,11 @@ function gameRender(newTimestamp) {
   let timePassed = lastTimestamp ? (newTimestamp - lastTimestamp) : 0;
   lastTimestamp = newTimestamp;
 
+  // Update the game state
+  currentGameHandler.updateState(timePassed);
+
   // Render
-  currentGameHandler.render(timePassed);
+  currentGameHandler.render();
 
   // Request next frame
   if (pageVisible) {
