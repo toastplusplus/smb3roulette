@@ -273,6 +273,7 @@ class InteractiveGameHandler {
 
       if (shouldStop) {
         isSlowing = false;
+        rowOffsets[currentRowIndex] = slowDestination; // Put it at the exact right spot
         rowSpeeds[currentRowIndex] = 0;
 
         if (currentRowIndex < 2) {
@@ -299,16 +300,14 @@ class InteractiveGameHandler {
     if (rowSpeeds[currentRowIndex] < 0) { // If moving left
       const nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
       const rowBase = rowOffsets[currentRowIndex] - (rowOffsets[currentRowIndex] % REPEAT_SIZE);
-      const nextOffset = nextIndex * IMAGE_OFFSET + rowBase;
 
-      slowDestination = nextOffset;
+      slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
       rowMatches[currentRowIndex] = matchData[nextIndex];
     } else {
-      const nextIndex = Math.ceil(rowOffset / IMAGE_OFFSET); // negative index
+      const nextIndex = Math.ceil(rowOffset / IMAGE_OFFSET);
       const rowBase = rowOffsets[currentRowIndex] - (rowOffsets[currentRowIndex] % REPEAT_SIZE);
-      const nextOffset = nextIndex * IMAGE_OFFSET + rowBase;
 
-      slowDestination = nextOffset;
+      slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
       rowMatches[currentRowIndex] = matchData[nextIndex];
     }
   }
