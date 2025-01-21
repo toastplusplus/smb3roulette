@@ -29,30 +29,82 @@ const box = canvas.getBoundingClientRect();
 let canvasWidth = box.width;
 let canvasHeight = box.height;
 
-// Game state
-const STATE = {
-  ROW_SPIN: 'ROW_SPIN',
-  ROW_STOP: 'ROW_STOP',
-  PRIZE: 'PRIZE',
-};
+const matchData = [{
+  imageId: 'star',
+  prizeId: '5up',
+  midpoint: 64
+}, {
+  imageId: 'mushroom',
+  prizeId: '2up',
+  midpoint: -64
+}, {
+  imageId: 'flower',
+  prizeId: '3up',
+  midpoint: -192
+}, {
+  imageId: 'mushroom',
+  prizeId: '2up',
+  midpoint: -320
+}, {
+  imageId: 'star',
+  prizeId: '5up',
+  midpoint: -448
+}, {
+  imageId: 'mushroom',
+  prizeId: '2up',
+  midpoint: -576
+}, {
+  imageId: 'flower',
+  prizeId: '3up',
+  midpoint: -704
+}, {
+  imageId: 'mushroom',
+  prizeId: '2up',
+  midpoint: -832
+}, {
+  imageId: 'star',
+  prizeId: '5up',
+  midpoint: -832
+}, {
+  imageId: 'mushroom',
+  prizeId: '2up',
+  midpoint: -832
+}, {
+  imageId: 'flower',
+  prizeId: '3up',
+  midpoint: -832
+}, {
+  imageId: 'mushroom',
+  prizeId: '2up',
+  midpoint: -832
+}];
 
-const RESET_POSITION = -1 * (512 + 64);
-const PRIZES = ['5up', '2up', '3up', '2up'];
+const RESET_POSITION = -576; // -1 * (512 + 64)
 const ROW_START_SPEEDS = [-.16, .16, -.24];
 //const ROW_START_SPEEDS = [-.01, .01, -.015];
 const ROW_START_OFFSETS = [RESET_POSITION, RESET_POSITION, RESET_POSITION];
 
+const SMALLEST_MIDPOINT = 64;
 const IMAGE_OFFSET = 128;
-const NEGATIVE_EDGE = -1 * (512 * 2) - 64;
+const RESET_AMOUNT = IMAGE_OFFSET * 4;
+const NEGATIVE_EDGE = -1088; // -1 * (512 * 2) - 64
 const POSITIVE_EDGE = -64;
+
+const SLOWING_SPEED_MULT = .5;
+const SHAKE_TIME_MS = 500;
 
 let lastTimestamp = null;
 let currentGameHandler = null;
 
-let gameState = STATE.ROW_SPIN;
 let rowSpeeds = ROW_START_SPEEDS.slice();
 let rowOffsets = ROW_START_OFFSETS.slice();
+let rowMatches = [null, null, null];
 let currentRowIndex = 0;
+let isSlowing = false;
+let slowDestination = null;
+
+let isShaking = false;
+let shakeTime = 0;
 
 // Music and image loading process
 let loadingPromises = [];
@@ -112,6 +164,8 @@ function handleInteraction() {
     if (loadedFiles) {
       startup();
     }
+  } else {
+    currentGameHandler.interact();
   }
 }
 
@@ -213,32 +267,12 @@ class InteractiveGameHandler {
     const stage = imageMap.get('background');
     ctx.drawImage(stage, 0, 0, canvasWidth, canvasHeight);
 
-    const mushroom = imageMap.get('mushroom');
-    const flower = imageMap.get('flower');
-    const star = imageMap.get('star');
-
-    // To make the logic easier, we repeat the images three times to allow easier looping
-    const images = [
-      star,
-      mushroom,
-      flower,
-      mushroom,
-      star,
-      mushroom,
-      flower,
-      mushroom,
-      star,
-      mushroom,
-      flower,
-      mushroom,
-    ];
-
     for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
       const rowOffset = rowOffsets[rowIndex];
 
-      for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
-        const imageOffset = IMAGE_OFFSET * imageIndex;
-        paintImageSegment(images[imageIndex], rowIndex, rowOffset + imageOffset);
+      for (let matchIndex = 0; matchIndex < matchData.length; matchIndex++) {
+        const imageOffset = IMAGE_OFFSET * matchIndex;
+        paintImageSegment(matchData[matchIndex].image, rowIndex, rowOffset + imageOffset);
       }
     }
 
@@ -258,9 +292,70 @@ class InteractiveGameHandler {
       }
       rowOffsets[rowIndex] = newOffset;
     }
+
+    if (isSlowing) {
+      let shouldStop = false;
+      if (rowSpeeds[currentRowIndex] < 0 && rowOffsets[currentRowIndex] < slowDestination) {
+        shouldStop = true;
+      } else if (rowSpeeds[currentRowIndex] > 0 && rowOffsets[currentRowIndex] > slowDestination) {
+        shouldStop = true;
+      }
+
+      if (shouldStop) {
+        isSlowing = false;
+        rowSpeeds[currentRowIndex] = 0;
+
+        if (currentRowIndex < 2) {
+          currentRowIndex++;
+        } else {
+          // Check for win
+        }
+      }
+    }
   }
 
-  click(e) {
+  interact() {
+    if (isSlowing) {
+      return;
+    }
+
+    isSlowing = true;
+    rowSpeeds[currentRowIndex] *= SLOWING_SPEED_MULT;
+
+    // determine the midpoint where we want to stop, and store the match data
+    const rowOffset = rowOffsets[currentRowIndex];
+
+    if (rowSpeeds[currentRowIndex] < 0) { // If moving left
+      let prevIndex = Math.floor(rowOffset / IMAGE_OFFSET) + matchData.length;
+      let prevOffset = -1 * (prevIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+
+      if (rowOffset - prevOffset < 64) {
+        prevIndex--;
+        prevOffset = -1 * (prevIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+      }
+
+      if (prevOffset < NEGATIVE_EDGE) {
+        prevIndex += 4;
+        prevOffset = -1 * (prevIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+      }
+      slowDestination = prevOffset;
+      rowMatches[currentRowIndex] = matchData[prevIndex];
+    } else {
+      let nextIndex = Math.ceil(rowOffset / IMAGE_OFFSET) + matchData.length;
+      let nextOffset = -1 * (nextIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+
+      if (nextOffset - rowOffset < 64) {
+        nextIndex++;
+        nextOffset = -1 * (nextIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+      }
+
+      if (nextOffset > POSITIVE_EDGE) {
+        prevIndex -= 4;
+        nextOffset = -1 * (nextIndex * IMAGE_OFFSET) + SMALLEST_MIDPOINT;
+      }
+      slowDestination = nextOffset;
+      rowMatches[currentRowIndex] = matchData[nextIndex];
+    }
   }
 }
 
@@ -279,6 +374,11 @@ function gameRender(newTimestamp) {
   if (pageVisible) {
     window.requestAnimationFrame(gameRender);
   }
+}
+
+for (let match of matchData) {
+  match.image = imageMap.get(match.imageId);
+  match.prize = imageMap.get(match.prizeId);
 }
 
 currentGameHandler = new InteractiveGameHandler();
