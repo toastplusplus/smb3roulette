@@ -3,7 +3,8 @@
 // Twitch Config
 // This is normally the only part you'd want to update
 const twitchEnabled = true; // UPDATE ME
-const twitchRedeemName = ''; // UPDATE ME
+const twitchRewardTitle = 'Stop the roulette'; // UPDATE ME
+const twitchUserName = 'happytoaster1'; // UPDATE ME
 const twitchAppClientId = 'nuzm3folc6kvdmgvgye31eiq6ufd1e';
 
 // HTML resource config
@@ -40,7 +41,7 @@ const audioMap = new Map();
 
 let pageVisible = document.visibilityState === 'visible';
 let loadedFiles = false;
-let started = false;
+let started = true; // TODO: revert
 
 // Canvas data
 const canvas = document.getElementById('canvas');
@@ -374,6 +375,7 @@ let deviceCode = null;
 let refreshToken = null;
 let accessToken = null;
 let accessTokenRefreshTimeout = null;
+let twitchUserId = null;
 let websocket = null;
 let websocketTimeoutSeconds = null
 let websocketTimeout = null;
@@ -417,6 +419,10 @@ function connectWebsocket() {
       return;
     }
   
+    if (eventData.metadata.message_type === 'session_keepalive') {
+      return;
+    }
+
     if (eventData.metadata.message_type === 'session_welcome') {
       websocketTimeoutSeconds = eventData.payload.session.keepalive_timeout_seconds;
       websocketSessionId = eventData.payload.session.id;
@@ -435,6 +441,10 @@ function connectWebsocket() {
       websocketSessionId = null;
 
       websocket = new WebSocket(eventData.payload.session.reconnect_url);
+    } else if (eventData.metadata.message_type === 'notification') {
+      if (eventData.payload.event.reward.title === twitchRewardTitle) {
+        handleInteraction();
+      }
     }
   });
 }
@@ -443,7 +453,9 @@ function subscribeToRedeems() {
   const postData = {
     type: 'channel.channel_points_custom_reward_redemption.add',
     version: '1',
-    condition: {},
+    condition: {
+      broadcaster_user_id: twitchUserId
+    },
     transport: {
       method: 'websocket',
       session_id: websocketSessionId
@@ -540,10 +552,35 @@ function requestAccessToken() {
 
       document.getElementById('authDiv').style.display = '';
 
-      connectWebsocket();
+      getTwitchUserId();
     }
   }).catch((e) => {
     setError(`Request to get Twitch auth failed with: ${e.message}`);
+  });
+}
+
+function getTwitchUserId() {
+  fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(twitchUserName)}`, {
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+      'Client-Id': twitchAppClientId,
+      'Content-Type': 'application/json',
+    },
+  }).then((resp) => {
+    return resp.json();
+  }).then((respJson) => {
+    if (respJson.status) {
+      setError(`Request to get user information from Twitch failed with: ${respJson.message}`);
+    } else {
+      clearError();
+
+      twitchUserId = respJson.data[0].id;
+      console.log('Retrieved Twitch user ID');
+      connectWebsocket();
+    }
+  }).catch((e) => {
+    setError(`Request to get user information from Twitch failed with: ${e.message}`);
   });
 }
 
@@ -553,7 +590,6 @@ function refreshAccessToken() {
 
 if (twitchEnabled) {
   // Try to load existing tokens up
-  localStorage.clear();
   const refreshTokenStorage = localStorage.getItem('smb3RefreshToken');
   const refreshTokenTimeStorage = localStorage.getItem('smb3RefreshTokenExpireTime');
   const accessTokenStorage = localStorage.getItem('smb3AccessToken');
@@ -570,7 +606,7 @@ if (twitchEnabled) {
 
   if (accessToken) {
     accessTokenRefreshTimeout = setTimeout(refreshAccessToken, Number(refreshTokenTimeStorage) - currentTime);
-    connectWebsocket();
+    getTwitchUserId();
   } else if (refreshToken) {
     refreshAccessToken();
   } else {
