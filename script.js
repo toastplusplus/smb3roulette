@@ -1,6 +1,12 @@
 'use strict';
 
-// Resource and loading data
+// Twitch Config
+// This is normally the only part you'd want to update
+const twitchEnabled = true; // UPDATE ME
+const twitchRedeemName = ''; // UPDATE ME
+const twitchAppClientId = 'nuzm3folc6kvdmgvgye31eiq6ufd1e';
+
+// HTML resource config
 const imageIds = [
   'background',
   'border',
@@ -14,21 +20,6 @@ const audioIds = [
   'match',
   'no_match'
 ];
-
-const imageMap = new Map();
-const audioMap = new Map();
-
-let pageVisible = document.visibilityState === 'visible';
-let loadedFiles = false;
-let started = false;
-
-// Canvas data
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext("2d");
-const box = canvas.getBoundingClientRect();
-let canvasWidth = box.width;
-let canvasHeight = box.height;
-
 const matchData = [{
   imageId: 'star',
   prizeId: '5up'
@@ -42,6 +33,21 @@ const matchData = [{
   imageId: 'mushroom',
   prizeId: '2up'
 }];
+
+// Loading data
+const imageMap = new Map();
+const audioMap = new Map();
+
+let pageVisible = document.visibilityState === 'visible';
+let loadedFiles = false;
+let started = false;
+
+// Canvas data
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext("2d");
+const box = canvas.getBoundingClientRect();
+let canvasWidth = box.width;
+let canvasHeight = box.height;
 
 const RESET_POSITION = -576; // -1 * (512 + 64)
 const ROW_START_SPEEDS = [-.16, .16, -.24];
@@ -327,5 +333,247 @@ function gameRender(newTimestamp) {
   // Request next frame
   if (pageVisible) {
     window.requestAnimationFrame(gameRender);
+  }
+}
+
+// Twitch events
+const refreshTokenExpireTime = (30 * 24 * 60 * 60 * 1000); // 30 days
+
+function setError(errMsg) {
+  console.error(errMsg);
+  document.getElementById('errorDiv').textContent = errMsg;
+}
+
+function clearError() {
+  document.getElementById('errorDiv').textContent = '';
+}
+
+class EventIdCache {
+  constructor(maxItems = 100) {
+    this.maxItems = maxItems;
+    this.cache = new Set();
+  }
+
+  test(key) {
+    let existed = this.cache.delete(key);
+    this.cache.add(key);
+    if (existed) {
+      return true;
+    }
+
+    if (this.cache.size > this.maxItems) {
+      this.cache.delete(this.cache.values().next().value);
+    }
+    return false;
+  }
+}
+
+const eventIdCache = new EventIdCache();
+
+let deviceCode = null;
+let refreshToken = null;
+let accessToken = null;
+let accessTokenRefreshTimeout = null;
+let websocket = null;
+let websocketTimeoutSeconds = null
+let websocketTimeout = null;
+let websocketSessionId = null;
+
+function twitchTimeoutHandler() {
+  console.log(`Reached Twitch's defined timeout of ${websocketTimeoutSeconds}, attempting reconnect`);
+  websocket.close();
+  websocketTimeoutSeconds = null;
+  websocketTimeout = null;
+  websocketSessionId = null;
+  websocket = new WebSocket('wss://eventsub.wss.twitch.tv/ws');
+}
+
+function connectWebsocket() {
+  websocket = new WebSocket('wss://eventsub.wss.twitch.tv/ws');
+
+  websocket.addEventListener('open', (_event) => {
+    console.log('Connected to Twitch events');
+  });
+  
+  websocket.addEventListener('close', (event) => {
+    setError(`Received websocket close from Twitch with code ${event.code} and reason ${event.reason} (try refreshing the page)`);
+    clearTimeout(websocketTimeout);
+    websocketTimeoutSeconds = null;
+    websocketTimeout = null;
+    websocketSessionId = null;
+  });
+  
+  websocket.addEventListener('message', (event) => {
+    const eventData = JSON.parse(event.data);
+
+    console.log(`Twitch event: ${JSON.stringify(eventData)}`);
+    if (websocketTimeout) {
+      clearTimeout(websocketTimeout);
+      websocketTimeout = setTimeout(twitchTimeoutHandler, websocketTimeoutSeconds * 1000);
+    }
+  
+    if (eventIdCache.test(eventData.metadata.message_id)) {
+      console.log(`Ignoring message with ID "${eventData.metadata.message_id}", as it has been seen before`);
+      return;
+    }
+  
+    if (eventData.metadata.message_type === 'session_welcome') {
+      websocketTimeoutSeconds = eventData.payload.session.keepalive_timeout_seconds;
+      websocketSessionId = eventData.payload.session.id;
+
+      console.log(`Received session_welcome. Starting keepalive timeout for ${websocketTimeoutSeconds} seconds.`);
+
+      clearTimeout(websocketTimeout);
+      websocketTimeout = setTimeout(twitchTimeoutHandler, websocketTimeoutSeconds * 1000);
+
+      subscribeToRedeems();
+
+    } else if (eventData.metadata.message_type === 'session_reconnect') {
+      clearTimeout(websocketTimeout);
+      websocketTimeoutSeconds = null;
+      websocketTimeout = null;
+      websocketSessionId = null;
+
+      websocket = new WebSocket(eventData.payload.session.reconnect_url);
+    }
+  });
+}
+
+function subscribeToRedeems() {
+  const postData = {
+    type: 'channel.channel_points_custom_reward_redemption.add',
+    version: '1',
+    condition: {},
+    transport: {
+      method: 'websocket',
+      session_id: websocketSessionId
+    }
+  }
+  fetch('https://api.twitch.tv/helix/eventsub/subscriptions', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+      'Client-Id': twitchAppClientId,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(postData)
+  }).then((resp) => {
+    return resp.json();
+  }).then((respJson) => {
+    if (respJson.status) {
+      setError(`Request to subscribe to channel points redeems failed with: ${respJson.message}`);
+    } else {
+      console.log('Successfully subscribed for channel points redeems');
+    }
+  }).catch((e) => {
+    setError(`Request to subscribe to channel points redeems failed with: ${e.message}`);
+  });
+}
+
+function userAuthCompleteCallback() {
+  document.getElementById('authDiv').style.display = 'none';
+  requestAccessToken();
+}
+
+function requestDeviceCode() {
+  const formData = new FormData();
+  formData.set('client_id', twitchAppClientId);
+  formData.set('scopes', 'channel:read:redemptions');
+
+  fetch('https://id.twitch.tv/oauth2/device', {
+    method: 'POST',
+    body: formData,
+    headers: {
+      'Accept': 'application/json'
+    }
+  }).then((resp) => {
+    return resp.json();
+  }).then((respJson) => {
+    if (respJson.status) {
+      if (respJson.status === 400 && respJson.message === 'authorization_pending') {
+        setError(`You need to authorize the app in the other tab.`);
+      } else {
+        setError(`Request to get Twitch device code failed with: ${respJson.message}`);
+      }
+    } else {
+      deviceCode = respJson.device_code;
+
+      document.getElementById('userAuthComplete').addEventListener('click', userAuthCompleteCallback);
+      document.getElementById('authTwitchAnchor').href = respJson.verification_uri;
+      document.getElementById('authDiv').style.display = '';
+    }
+  }).catch((e) => {
+    setError(`Request to get Twitch auth failed with: ${e.message}`);
+  });
+}
+
+function requestAccessToken() {
+  const formData = new FormData();
+  formData.set('client_id', twitchAppClientId);
+  formData.set('scopes', 'channel:read:redemptions');
+  formData.set('device_code', deviceCode);
+  formData.set('grant_type', 'urn:ietf:params:oauth:grant-type:device_code');
+
+  fetch('https://id.twitch.tv/oauth2/token', {
+    method: 'POST',
+    body: formData,
+    headers: {
+      'Accept': 'application/json'
+    }
+  }).then((resp) => {
+    return resp.json();
+  }).then((respJson) => {
+    if (respJson.status) {
+      setError(`Request to get Twitch auth token failed with: ${respJson.message}`);
+    } else {
+      clearError();
+
+      accessToken = respJson.access_token;
+      refreshToken = respJson.refresh_token;
+
+      const timeNow = new Date().getTime();
+      localStorage.setItem('smb3AccessToken', accessToken);
+      localStorage.setItem('smb3AccessTokenExpireTime', timeNow + (respJson.expires_in * 1000));
+      localStorage.setItem('smb3RefreshToken', refreshToken);
+      localStorage.setItem('smb3RefreshTokenExpireTime', timeNow + refreshTokenExpireTime); // Not in response
+
+      document.getElementById('authDiv').style.display = '';
+
+      connectWebsocket();
+    }
+  }).catch((e) => {
+    setError(`Request to get Twitch auth failed with: ${e.message}`);
+  });
+}
+
+function refreshAccessToken() {
+  // TODO
+}
+
+if (twitchEnabled) {
+  // Try to load existing tokens up
+  localStorage.clear();
+  const refreshTokenStorage = localStorage.getItem('smb3RefreshToken');
+  const refreshTokenTimeStorage = localStorage.getItem('smb3RefreshTokenExpireTime');
+  const accessTokenStorage = localStorage.getItem('smb3AccessToken');
+  const accessTokenExpireTimeStorage = localStorage.getItem('smb3AccessTokenExpireTime');
+
+  const currentTime = new Date().getTime();
+
+  if (refreshTokenStorage && refreshTokenTimeStorage && currentTime < Number(refreshTokenTimeStorage)) {
+    refreshToken = refreshTokenStorage;
+  }
+  if (accessTokenStorage && accessTokenExpireTimeStorage && currentTime < Number(accessTokenExpireTimeStorage)) {
+    accessToken = accessTokenStorage;
+  }
+
+  if (accessToken) {
+    accessTokenRefreshTimeout = setTimeout(refreshAccessToken, Number(refreshTokenTimeStorage) - currentTime);
+    connectWebsocket();
+  } else if (refreshToken) {
+    refreshAccessToken();
+  } else {
+    requestDeviceCode();
   }
 }

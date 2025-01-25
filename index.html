@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html style="width: 100%; height: 100%">
   <body style="width: 100%; height: 100%; margin: 0; overflow: hidden;">
+    <div id="errorDiv" style="color: red"></div>
+    <div id="authDiv" style="display: none">
+      <div>To authorize this app for Twitch, click this link.</div>
+      <a id="authTwitchAnchor" target="_blank" rel="noopener noreferrer">Click here (opens a new tab)</a>
+      <button id="userAuthComplete" type="button">Click here when complete</button>
+    </div>
     <div id="pressSpace" style="width:100%; height:100%;">Press space or click to start (browser audio requirement)</div>
     <canvas id="canvas" display="none"></canvas>
     <span style="display: none">
@@ -14,6 +20,6 @@
       <img id="flower" src="img/flower.png"></img>
       <img id="star" src="img/star.png"></img>
     </span>
-    <script type="text/javascript" src="script.js" defer></script>
+    <script type="text/javascript" src="script.js"></script>
   </body>
 </html>
