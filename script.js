@@ -70,6 +70,9 @@ let rowMatches = [null, null, null];
 let currentRowIndex = 0;
 let isSlowing = false;
 let slowDestination = null;
+let isAwardingPrize = false;
+let prizeId = null;
+let prizeLocation = null;
 
 let isShaking = false;
 let shakeTime = 0;
@@ -286,9 +289,40 @@ class InteractiveGameHandler {
         if (currentRowIndex < 2) {
           currentRowIndex++;
         } else {
-          // Check for win
+          this.handleEndGame();
         }
       }
+    }
+  }
+
+  handleEndGame() {
+    let matches = true;
+    let currentPrizeId = null;
+    for (let match of rowMatches) {
+      if (!currentPrizeId) {
+        currentPrizeId = match.prizeId;
+      } else {
+        if (match.prizeId !== currentPrizeId) {
+          matches = false;
+          break;
+        }
+      }
+    }
+
+    rowSpeeds = ROW_START_SPEEDS.slice();
+    rowOffsets = ROW_START_OFFSETS.slice();
+    rowMatches = [null, null, null];
+    currentRowIndex = 0;
+    isSlowing = false;
+    slowDestination = null;
+
+    if (matches) {
+      // TODO
+      isAwardingPrize = true;
+      prizeId = currentPrizeId;
+      //prizeLocation = ;
+    } else {
+      
     }
   }
 
@@ -310,13 +344,13 @@ class InteractiveGameHandler {
     if (rowSpeeds[currentRowIndex] < 0) { // If moving left
       nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
       slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
+      nextIndex += 4;
     } else {
       nextIndex = (Math.ceil(rowOffset / IMAGE_OFFSET) + 1) % 4;
       slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
       if (slowDestination < offsetWithoutRenderOffset) {
         slowDestination += REPEAT_SIZE;
       }
-      console.log(`offsetWithoutRenderOffset=${offsetWithoutRenderOffset}, rowOffset=${rowOffset}, rowBase=${rowBase}, rowOffset / IMAGE_OFFSET=${rowOffset / IMAGE_OFFSET} nextIndex=${nextIndex}, slowDestination=${slowDestination}`);
     }
 
     rowMatches[currentRowIndex] = matchData[nextIndex];
