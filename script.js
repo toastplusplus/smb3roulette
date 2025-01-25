@@ -302,21 +302,24 @@ class InteractiveGameHandler {
 
     // determine the midpoint where we want to stop, and store the match data
 
-    const rowOffset = (rowOffsets[currentRowIndex] + RENDER_OFFSET) % REPEAT_SIZE;
+    const offsetWithoutRenderOffset = (rowOffsets[currentRowIndex] + RENDER_OFFSET)
+    const rowOffset = (offsetWithoutRenderOffset) % REPEAT_SIZE;
+    const rowBase = offsetWithoutRenderOffset - (offsetWithoutRenderOffset % REPEAT_SIZE);
+    let nextIndex;
 
     if (rowSpeeds[currentRowIndex] < 0) { // If moving left
-      const nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
-      const rowBase = rowOffsets[currentRowIndex] - (rowOffsets[currentRowIndex] % REPEAT_SIZE);
-
+      nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
       slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
-      rowMatches[currentRowIndex] = matchData[nextIndex];
     } else {
-      const nextIndex = Math.ceil(rowOffset / IMAGE_OFFSET);
-      const rowBase = rowOffsets[currentRowIndex] - (rowOffsets[currentRowIndex] % REPEAT_SIZE);
-
+      nextIndex = (Math.ceil(rowOffset / IMAGE_OFFSET) + 1) % 4;
       slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
-      rowMatches[currentRowIndex] = matchData[nextIndex];
+      if (slowDestination < offsetWithoutRenderOffset) {
+        slowDestination += REPEAT_SIZE;
+      }
+      console.log(`offsetWithoutRenderOffset=${offsetWithoutRenderOffset}, rowOffset=${rowOffset}, rowBase=${rowBase}, rowOffset / IMAGE_OFFSET=${rowOffset / IMAGE_OFFSET} nextIndex=${nextIndex}, slowDestination=${slowDestination}`);
     }
+
+    rowMatches[currentRowIndex] = matchData[nextIndex];
   }
 }
 
