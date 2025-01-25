@@ -2,7 +2,7 @@
 
 // Twitch Config
 // This is normally the only part you'd want to update
-const twitchEnabled = true; // UPDATE ME
+const twitchEnabled = false; // UPDATE ME
 const twitchRewardTitle = ''; // UPDATE ME
 const twitchUserName = ''; // UPDATE ME
 const twitchAppClientId = 'nuzm3folc6kvdmgvgye31eiq6ufd1e';
@@ -55,6 +55,12 @@ let canvasHeight = box.height;
 
 const PIXEL_WIDTH = 234;
 const PIXEL_HEIGHT = 162;
+
+const MATCH_PIXEL_WIDTH = 96;
+const MATCH_PIXEL_HEIGHT = 112;
+
+const PRIZE_PIXEL_WIDTH = 24;
+const PRIZE_PIXEL_HEIGHT = 16;
 
 const RESET_POSITION = -576; // -1 * (512 + 64)
 const ROW_START_SPEEDS = [-.16, .16, -.24];
@@ -227,7 +233,7 @@ window.addEventListener('resize', function() {
 // RowIndex is the prize gmae row
 // Offset is in logical game pixels, (234 pixels across)
 function paintImageSegment(image, rowIndex, rowOffset) {
-  const segmentSize = image.height / 7;
+  const segmentSize = MATCH_PIXEL_HEIGHT / 7;
   const canvasSegmentWidth = canvasWidth / 14;
   const canvasSegmentHeight = canvasHeight / 9;
   const canvasOffset = (canvasWidth / PIXEL_WIDTH) * rowOffset;
@@ -241,31 +247,31 @@ function paintImageSegment(image, rowIndex, rowOffset) {
   if (rowIndex === 0) {
     ctx.drawImage(image,
       0, 0,
-      image.width, segmentSize * 2,
+      MATCH_PIXEL_WIDTH, segmentSize * 2,
       canvasOffset, Math.floor(canvasSegmentHeight),
       canvasSegmentWidth * 6, Math.ceil(canvasSegmentHeight * 2));
   } else if (rowIndex === 1) {
     ctx.drawImage(image,
       0, segmentSize * 2,
-      image.width, segmentSize * 3,
+      MATCH_PIXEL_WIDTH, segmentSize * 3,
       canvasOffset, Math.floor(canvasSegmentHeight * 3),
       canvasSegmentWidth * 6, Math.ceil(canvasSegmentHeight * 3));
   } else {
     ctx.drawImage(image,
       0, segmentSize * 5,
-      image.width, segmentSize * 2,
+      MATCH_PIXEL_WIDTH, segmentSize * 2,
       canvasOffset, Math.floor(canvasSegmentHeight * 6),
       canvasSegmentWidth * 6, Math.ceil(canvasSegmentHeight * 2));
   }
 }
 
 function paintPrize(image, heightOffset) {
-  const minY = (canvasHeight / 2) - (((canvasHeight / PIXEL_HEIGHT) * image.height) / 2);
+  const minY = (canvasHeight / 2) - (((canvasHeight / PIXEL_HEIGHT) * PRIZE_PIXEL_HEIGHT) / 2);
 
-  const xCord = (canvasWidth / 2) - (image.width / 2);
+  const xCord = (canvasWidth / 2) - (PRIZE_PIXEL_WIDTH / 2);
   const yCord = Math.max((canvasHeight / PIXEL_HEIGHT) * heightOffset, minY);
-  const destWidth = (canvasWidth / PIXEL_WIDTH) * image.width;
-  const destHeight = (canvasHeight / PIXEL_HEIGHT) * image.height;
+  const destWidth = (canvasWidth / PIXEL_WIDTH) * PRIZE_PIXEL_WIDTH;
+  const destHeight = (canvasHeight / PIXEL_HEIGHT) * PRIZE_PIXEL_HEIGHT;
 
   ctx.drawImage(image, xCord, yCord, destWidth, destHeight);
 }
@@ -357,6 +363,7 @@ function handleEndGame() {
     prizeId = currentPrizeId;
     prizeLocation = PIXEL_HEIGHT;
   } else {
+    // TODO: Pause a bit
     resetGame();    
   }
 }
