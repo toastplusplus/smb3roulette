@@ -3,8 +3,8 @@
 // Twitch Config
 // This is normally the only part you'd want to update
 const twitchEnabled = true; // UPDATE ME
-const twitchRewardTitle = 'Stop the roulette'; // UPDATE ME
-const twitchUserName = 'happytoaster1'; // UPDATE ME
+const twitchRewardTitle = ''; // UPDATE ME
+const twitchUserName = ''; // UPDATE ME
 const twitchAppClientId = 'nuzm3folc6kvdmgvgye31eiq6ufd1e';
 
 // HTML resource config
@@ -13,7 +13,10 @@ const imageIds = [
   'border',
   'mushroom',
   'flower',
-  'star'
+  'star',
+  '2up',
+  '3up',
+  '5up'
 ];
 const audioIds = [
   'music_loop',
@@ -50,6 +53,9 @@ const box = canvas.getBoundingClientRect();
 let canvasWidth = box.width;
 let canvasHeight = box.height;
 
+const PIXEL_WIDTH = 234;
+const PIXEL_HEIGHT = 162;
+
 const RESET_POSITION = -576; // -1 * (512 + 64)
 const ROW_START_SPEEDS = [-.16, .16, -.24];
 const ROW_START_OFFSETS = [0, 0, 0];
@@ -61,8 +67,10 @@ const REPEAT_SIZE = IMAGE_OFFSET * 4;
 const SLOWING_SPEED_MULT = .5;
 const SHAKE_TIME_MS = 500;
 
+const PRIZE_SPEED = -.1;
+const PRIZE_TIME_ON_SCREEN_MS = 5000;
+
 let lastTimestamp = null;
-let currentGameHandler = null;
 
 let rowSpeeds = ROW_START_SPEEDS.slice();
 let rowOffsets = ROW_START_OFFSETS.slice();
@@ -73,6 +81,7 @@ let slowDestination = null;
 let isAwardingPrize = false;
 let prizeId = null;
 let prizeLocation = null;
+let prizeTime = 0;
 
 let isShaking = false;
 let shakeTime = 0;
@@ -130,12 +139,23 @@ function startup() {
     match.image = imageMap.get(match.imageId);
     match.prize = imageMap.get(match.prizeId);
   }
-  
-  currentGameHandler = new InteractiveGameHandler();
 
   document.getElementById('pressSpace').style.display = 'none';
   resizeCanvas();
   window.requestAnimationFrame(gameRender);
+}
+
+function resetGame() {
+  rowSpeeds = ROW_START_SPEEDS.slice();
+  rowOffsets = ROW_START_OFFSETS.slice();
+  rowMatches = [null, null, null];
+  currentRowIndex = 0;
+  isSlowing = false;
+  slowDestination = null;
+  isAwardingPrize = false;
+  prizeId = null;
+  prizeLocation = null;
+  prizeTime = 0;
 }
 
 function handleInteraction() {
@@ -145,7 +165,7 @@ function handleInteraction() {
       startup();
     }
   } else {
-    currentGameHandler.interact();
+    interact();
   }
 }
 
@@ -210,7 +230,7 @@ function paintImageSegment(image, rowIndex, rowOffset) {
   const segmentSize = image.height / 7;
   const canvasSegmentWidth = canvasWidth / 14;
   const canvasSegmentHeight = canvasHeight / 9;
-  const canvasOffset = (canvasWidth / 234) * rowOffset;
+  const canvasOffset = (canvasWidth / PIXEL_WIDTH) * rowOffset;
 
   // Note that when rendering the sprites in pieces we need to be careful about pixel rounding, as
   // otherwise the browser will do it for us, and sometimes leave gaps.
@@ -239,122 +259,141 @@ function paintImageSegment(image, rowIndex, rowOffset) {
   }
 }
 
-class InteractiveGameHandler {
-  render() {
-    ctx.fillStyle = '000';
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-  
-    const stage = imageMap.get('background');
-    ctx.drawImage(stage, 0, 0, canvasWidth, canvasHeight);
+function paintPrize(image, heightOffset) {
+  const minY = (canvasHeight / 2) - (((canvasHeight / PIXEL_HEIGHT) * image.height) / 2);
 
-    for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
-      const rowOffset = rowOffsets[rowIndex];
-      const rowModOffset = rowOffset % REPEAT_SIZE;
+  const xCord = (canvasWidth / 2) - (image.width / 2);
+  const yCord = Math.max((canvasHeight / PIXEL_HEIGHT) * heightOffset, minY);
+  const destWidth = (canvasWidth / PIXEL_WIDTH) * image.width;
+  const destHeight = (canvasHeight / PIXEL_HEIGHT) * image.height;
 
-      // The idea here is to repeat the rendering to ensure there is always something on screen.
-      // We could be slightly more efficient with the different directions to cut one loop.
-      for (let renderRep = -1; renderRep <= 1; renderRep++) {
-        for (let matchIndex = 0; matchIndex < matchData.length; matchIndex++) {
-          const beforeOffset = rowModOffset + (renderRep * REPEAT_SIZE) + RENDER_OFFSET;
-          const imageOffset = IMAGE_OFFSET * matchIndex;
-          paintImageSegment(matchData[matchIndex].image, rowIndex, beforeOffset + imageOffset);
-        }
-      }
-    }
+  ctx.drawImage(image, xCord, yCord, destWidth, destHeight);
+}
 
-    const border = imageMap.get('border');
-    ctx.drawImage(border, 0, 0, canvasWidth, canvasHeight);
-  }
+function render() {
+  ctx.fillStyle = '000';
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-  updateState(timePassed) {
-    for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
-      let newOffset = rowOffsets[rowIndex];
-      newOffset += (rowSpeeds[rowIndex] * timePassed);
-      rowOffsets[rowIndex] = newOffset;
-    }
+  const stage = imageMap.get('background');
+  ctx.drawImage(stage, 0, 0, canvasWidth, canvasHeight);
 
-    if (isSlowing) {
-      let shouldStop = false;
-      if (rowSpeeds[currentRowIndex] < 0 && rowOffsets[currentRowIndex] < slowDestination) {
-        shouldStop = true;
-      } else if (rowSpeeds[currentRowIndex] > 0 && rowOffsets[currentRowIndex] > slowDestination) {
-        shouldStop = true;
-      }
+  for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
+    const rowOffset = rowOffsets[rowIndex];
+    const rowModOffset = rowOffset % REPEAT_SIZE;
 
-      if (shouldStop) {
-        isSlowing = false;
-        rowOffsets[currentRowIndex] = slowDestination; // Put it at the exact right spot
-        rowSpeeds[currentRowIndex] = 0;
-
-        if (currentRowIndex < 2) {
-          currentRowIndex++;
-        } else {
-          this.handleEndGame();
-        }
+    // The idea here is to repeat the rendering to ensure there is always something on screen.
+    // We could be slightly more efficient with the different directions to cut one loop.
+    for (let renderRep = -1; renderRep <= 1; renderRep++) {
+      for (let matchIndex = 0; matchIndex < matchData.length; matchIndex++) {
+        const beforeOffset = rowModOffset + (renderRep * REPEAT_SIZE) + RENDER_OFFSET;
+        const imageOffset = IMAGE_OFFSET * matchIndex;
+        paintImageSegment(matchData[matchIndex].image, rowIndex, beforeOffset + imageOffset);
       }
     }
   }
 
-  handleEndGame() {
-    let matches = true;
-    let currentPrizeId = null;
-    for (let match of rowMatches) {
-      if (!currentPrizeId) {
-        currentPrizeId = match.prizeId;
+  const border = imageMap.get('border');
+  ctx.drawImage(border, 0, 0, canvasWidth, canvasHeight);
+
+  if (isAwardingPrize) {
+    paintPrize(imageMap.get(prizeId), prizeLocation);
+  }
+}
+
+function updateState(timePassed) {
+  for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
+    let newOffset = rowOffsets[rowIndex];
+    newOffset += (rowSpeeds[rowIndex] * timePassed);
+    rowOffsets[rowIndex] = newOffset;
+  }
+
+  if (isSlowing) {
+    let shouldStop = false;
+    if (rowSpeeds[currentRowIndex] < 0 && rowOffsets[currentRowIndex] < slowDestination) {
+      shouldStop = true;
+    } else if (rowSpeeds[currentRowIndex] > 0 && rowOffsets[currentRowIndex] > slowDestination) {
+      shouldStop = true;
+    }
+
+    if (shouldStop) {
+      isSlowing = false;
+      rowOffsets[currentRowIndex] = slowDestination; // Put it at the exact right spot
+      rowSpeeds[currentRowIndex] = 0;
+
+      if (currentRowIndex < 2) {
+        currentRowIndex++;
       } else {
-        if (match.prizeId !== currentPrizeId) {
-          matches = false;
-          break;
-        }
+        handleEndGame();
       }
-    }
-
-    rowSpeeds = ROW_START_SPEEDS.slice();
-    rowOffsets = ROW_START_OFFSETS.slice();
-    rowMatches = [null, null, null];
-    currentRowIndex = 0;
-    isSlowing = false;
-    slowDestination = null;
-
-    if (matches) {
-      // TODO
-      isAwardingPrize = true;
-      prizeId = currentPrizeId;
-      //prizeLocation = ;
-    } else {
-      
     }
   }
 
-  interact() {
-    if (isSlowing) {
-      return;
+  if (isAwardingPrize) {
+    prizeLocation += timePassed * PRIZE_SPEED;
+    prizeTime += timePassed;
+
+    if (prizeTime > PRIZE_TIME_ON_SCREEN_MS) {
+      resetGame();
     }
+  }
+}
 
-    isSlowing = true;
-    rowSpeeds[currentRowIndex] *= SLOWING_SPEED_MULT;
-
-    // determine the midpoint where we want to stop, and store the match data
-
-    const offsetWithoutRenderOffset = (rowOffsets[currentRowIndex] + RENDER_OFFSET)
-    const rowOffset = (offsetWithoutRenderOffset) % REPEAT_SIZE;
-    const rowBase = offsetWithoutRenderOffset - (offsetWithoutRenderOffset % REPEAT_SIZE);
-    let nextIndex;
-
-    if (rowSpeeds[currentRowIndex] < 0) { // If moving left
-      nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
-      slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
-      nextIndex += 4;
+function handleEndGame() {
+  let matches = true;
+  let currentPrizeId = null;
+  for (let match of rowMatches) {
+    if (!currentPrizeId) {
+      currentPrizeId = match.prizeId;
     } else {
-      nextIndex = (Math.ceil(rowOffset / IMAGE_OFFSET) + 1) % 4;
-      slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
-      if (slowDestination < offsetWithoutRenderOffset) {
-        slowDestination += REPEAT_SIZE;
+      if (match.prizeId !== currentPrizeId) {
+        matches = false;
+        break;
       }
     }
-
-    rowMatches[currentRowIndex] = matchData[nextIndex];
   }
+
+  if (matches) {
+    isAwardingPrize = true;
+    prizeId = currentPrizeId;
+    prizeLocation = PIXEL_HEIGHT;
+  } else {
+    resetGame();    
+  }
+}
+
+function interact() {
+  if (isSlowing) {
+    return;
+  }
+
+  isSlowing = true;
+  rowSpeeds[currentRowIndex] *= SLOWING_SPEED_MULT;
+
+  // determine the midpoint where we want to stop, and store the match data
+
+  const offsetWithoutRenderOffset = (rowOffsets[currentRowIndex] + RENDER_OFFSET)
+  const rowOffset = (offsetWithoutRenderOffset) % REPEAT_SIZE;
+  const rowBase = offsetWithoutRenderOffset - (offsetWithoutRenderOffset % REPEAT_SIZE);
+  let nextIndex;
+
+  // TODO: Revert
+  if (rowSpeeds[currentRowIndex] < 0) { // If moving left
+    nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
+    //nextIndex = 0;
+    slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
+    nextIndex += 4;
+  } else {
+    nextIndex = (Math.ceil(rowOffset / IMAGE_OFFSET) + 1) % 4;
+    //nextIndex = 0;
+    slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
+    if (slowDestination < offsetWithoutRenderOffset) {
+      slowDestination += REPEAT_SIZE;
+    }
+  }
+
+  nextIndex++;
+  nextIndex %= 4;
+  rowMatches[currentRowIndex] = matchData[nextIndex];
 }
 
 function gameRender(newTimestamp) {
@@ -363,10 +402,10 @@ function gameRender(newTimestamp) {
   lastTimestamp = newTimestamp;
 
   // Update the game state
-  currentGameHandler.updateState(timePassed);
+  updateState(timePassed);
 
   // Render
-  currentGameHandler.render();
+  render();
 
   // Request next frame
   if (pageVisible) {
