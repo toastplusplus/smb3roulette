@@ -680,6 +680,8 @@ function requestAccessToken() {
       localStorage.setItem('smb3RefreshToken', refreshToken);
       localStorage.setItem('smb3RefreshTokenExpireTime', timeNow + refreshTokenExpireTime); // Not in response
 
+      accessTokenRefreshTimeout = setTimeout(refreshAccessToken, (respJson.expires_in * 1000));
+
       getTwitchUserId();
     }
   }).catch((e) => {
@@ -713,7 +715,39 @@ function getTwitchUserId() {
 }
 
 function refreshAccessToken() {
-  // TODO
+  console.log('Refreshing access token');
+
+  const formData = new FormData();
+  formData.set('grant_type', 'refresh_token');
+  formData.set('refresh_token', refreshToken);
+  formData.set('client_id', twitchAppClientId);
+
+  fetch('https://id.twitch.tv/oauth2/token', {
+    method: 'POST',
+    body: formData,
+    headers: {
+      'Accept': 'application/json'
+    }
+  }).then((resp) => {
+    return resp.json();
+  }).then((respJson) => {
+    if (respJson.status) {
+      setError(`Request to refresh Twitch auth token failed with: ${respJson.message}`);
+    } else {
+      clearError();
+
+      accessToken = respJson.access_token;
+      refreshToken = respJson.refresh_token;
+
+      const timeNow = new Date().getTime();
+      localStorage.setItem('smb3AccessToken', accessToken);
+      localStorage.setItem('smb3AccessTokenExpireTime', timeNow + (respJson.expires_in * 1000));
+      localStorage.setItem('smb3RefreshToken', refreshToken);
+      localStorage.setItem('smb3RefreshTokenExpireTime', timeNow + refreshTokenExpireTime); // Not in response
+    }
+  }).catch((e) => {
+    setError(`Request to refresh Twitch auth token failed with: ${e.message}`);
+  });
 }
 
 if (twitchEnabled) {
@@ -737,7 +771,7 @@ if (twitchEnabled) {
     accessToken = accessTokenStorage;
   }
 
-  if (accessToken) {
+  if (accessToken && refreshToken) {
     accessTokenRefreshTimeout = setTimeout(refreshAccessToken, Number(refreshTokenTimeStorage) - currentTime);
     getTwitchUserId();
   } else if (refreshToken) {
