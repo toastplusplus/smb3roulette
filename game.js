@@ -1,41 +1,23 @@
 'use strict';
 
-// Twitch Config
-// This is normally the only part you'd want to update
-const twitchEnabled = false; // UPDATE ME
-const twitchRewardTitle = ''; // UPDATE ME
-const twitchUserName = ''; // UPDATE ME
-const twitchAppClientId = 'nuzm3folc6kvdmgvgye31eiq6ufd1e';
-
-// HTML resource config
-const imageIds = [
-  'background',
-  'border',
-  'mushroom',
-  'flower',
-  'star',
-  '2up',
-  '3up',
-  '5up'
-];
-const audioIds = [
-  'music_loop',
-  'one_up',
-  'match',
-  'no_match'
-];
+// Data for the roulette itself
+// The IDs must match HTML image IDs in game.html
 const matchData = [{
   imageId: 'star',
-  prizeId: '5up'
+  prizeId: '5up',
+  soundCount: 5
 }, {
   imageId: 'mushroom',
-  prizeId: '2up'
+  prizeId: '2up',
+  soundCount: 2
 }, {
   imageId: 'flower',
-  prizeId: '3up'
+  prizeId: '3up',
+  soundCount: 3
 }, {
   imageId: 'mushroom',
-  prizeId: '2up'
+  prizeId: '2up',
+  soundCount: 2
 }];
 
 // Loading data
@@ -44,7 +26,8 @@ const audioMap = new Map();
 
 let pageVisible = document.visibilityState === 'visible';
 let loadedFiles = false;
-let started = true; // TODO: revert
+let audioStart = (!musicEnabled && ! soundEnabled); // Consider the audio started if everything is disabled
+let started = false;
 
 // Canvas data
 const canvas = document.getElementById('canvas');
@@ -53,6 +36,7 @@ const box = canvas.getBoundingClientRect();
 let canvasWidth = box.width;
 let canvasHeight = box.height;
 
+// Game logic constants
 const PIXEL_WIDTH = 234;
 const PIXEL_HEIGHT = 162;
 
@@ -72,10 +56,15 @@ const REPEAT_SIZE = IMAGE_OFFSET * 4;
 
 const SLOWING_SPEED_MULT = .5;
 const SHAKE_TIME_MS = 500;
+const SHAKE_AMPLITUDE = 3;
 
 const PRIZE_SPEED = -.1;
-const PRIZE_TIME_ON_SCREEN_MS = 5000;
+const PRIZE_SOUND_DELAY = 1000;
+const PRIZE_TIME_PER_COUNT_MS = 1000;
 
+const END_GAME_PAUSE_MS = 3000;
+
+// The actual game state
 let lastTimestamp = null;
 
 let rowSpeeds = ROW_START_SPEEDS.slice();
@@ -84,68 +73,103 @@ let rowMatches = [null, null, null];
 let currentRowIndex = 0;
 let isSlowing = false;
 let slowDestination = null;
+let isShaking = false;
+let shakeTime = 0;
+let shakeOffset = 0;
 let isAwardingPrize = false;
 let prizeId = null;
 let prizeLocation = null;
 let prizeTime = 0;
-
-let isShaking = false;
-let shakeTime = 0;
+let isPlayingPrizeSounds = false;
+let prizeSoundCount = 0;
+let prizeSoundsPlayed = 0;
+let prizeSoundTime = 0;
+let endGamePause = false;
+let lossPauseTime = 0;
 
 // Music and image loading process
 let loadingPromises = [];
-for (const imageId of imageIds) {
+for (const imageElem of document.images) {
   let promise = new Promise((resolve, reject) => {
-    const imageElem = document.getElementById(imageId);
     if (imageElem.complete) {
-      console.log(`Loaded image ${imageId} (loaded immediately)`);
+      console.log(`Loaded image ${imageElem.id} (loaded immediately)`);
       resolve();
     } else {
       imageElem.addEventListener('load', () => {
-        console.log(`Loaded image ${imageId}`);
+        console.log(`Loaded image ${imageElem.id}`);
         resolve();
       });
       imageElem.addEventListener('error', (err) => {
-        console.error(`Error loading image ${imageId}`);
+        console.error(`Error loading image ${imageElem.id}: ${err}`);
         reject();
       });
     }
-    imageMap.set(imageId, imageElem);
+    imageMap.set(imageElem.id, imageElem);
   });
   loadingPromises.push(promise);
 }
 
-for (const audioId of audioIds) {
+const audioElems = document.querySelectorAll('audio');
+for (const audioElem of audioElems) {
   let promise = new Promise((resolve, reject) => {
-    const audioElem = document.getElementById(audioId);
     audioElem.addEventListener('loadeddata', () => {
-      console.log(`Loaded audio ${audioId}`);
+      console.log(`Loaded audio ${audioElem.id}`);
       resolve()
     });
     audioElem.addEventListener('error', (err) => {
-      console.error(`Error audio ${audioId}`);
+      console.error(`Error audio ${audioElem.id}: ${err}`);
       reject();
     });
-    audioMap.set(audioId, audioElem);
+    audioMap.set(audioElem.id, audioElem);
   });
   loadingPromises.push(promise);
 }
 
+// Try to handle the case where the browser allows sound to be played without interaction
+document.getElementById('empty').play().then(() => {
+  audioStart = true;
+  console.log('Allowed to play sound by default');
+}).catch(() => {
+  console.log('Not allowed to play sound by default');
+});
+
 Promise.all(loadingPromises).then(() => {
   loadedFiles = true;
-  if (started) {
+  
+  if (audioStart && !started) {
     startup();
   }
 });
 
+function playSfx(soundId) {
+  if (soundEnabled) {
+    audioMap.get(soundId).play();
+  }
+}
+
+function playMusic(soundId) {
+  if (musicEnabled) {
+    audioMap.get(soundId).play();
+  }
+}
+
+function stopSound(soundId) {
+  const audioElem = audioMap.get(soundId);
+  audioElem.pause();
+  audioElem.currentTime = 0;
+}
+
 function startup() {
   console.log('Starting');
+  started = true;
 
   for (let match of matchData) {
     match.image = imageMap.get(match.imageId);
     match.prize = imageMap.get(match.prizeId);
   }
 
+  playMusic('music_loop');
+  playMusic('pmeter_loop');
   document.getElementById('pressSpace').style.display = 'none';
   resizeCanvas();
   window.requestAnimationFrame(gameRender);
@@ -158,35 +182,35 @@ function resetGame() {
   currentRowIndex = 0;
   isSlowing = false;
   slowDestination = null;
+  isShaking = false;
+  shakeTime = 0;
+  shakeOffset = 0;
   isAwardingPrize = false;
   prizeId = null;
   prizeLocation = null;
   prizeTime = 0;
+  isPlayingPrizeSounds = false;
+  prizeSoundCount = 0;
+  prizeSoundsPlayed = 0;
+  prizeSoundTime = 0;
+  endGamePause = false;
+  lossPauseTime = 0;
+
+  playMusic('pmeter_loop');
 }
 
 function handleInteraction() {
-  if (!started) {
-    started = true;
-    if (loadedFiles) {
-      startup();
-    }
-  } else {
+  // If the user interacted, we should be able to play sounds
+  if (!audioStart) {
+    audioStart = true;
+  }
+
+  if (loadedFiles && !started) {
+    startup();
+  } else if (started) {
     interact();
   }
 }
-
-document.addEventListener('visibilitychange', function() {
-  pageVisible = document.visibilityState === 'visible';
-  if (pageVisible) {
-    console.log('Page visible');
-    if (started) {
-      window.requestAnimationFrame(gameRender);
-    }
-  } else {
-    console.log('Page not visible');
-    lastTimestamp = null;
-  }
-});
 
 document.addEventListener('click', function(event) {
   handleInteraction();
@@ -225,7 +249,7 @@ function resizeCanvas() {
 }
 
 window.addEventListener('resize', function() {
-  if (started) {
+  if (audioStart) {
     resizeCanvas();
   }
 });
@@ -233,7 +257,7 @@ window.addEventListener('resize', function() {
 // RowIndex is the prize gmae row
 // Offset is in logical game pixels, (234 pixels across)
 function paintImageSegment(image, rowIndex, rowOffset) {
-  const segmentSize = MATCH_PIXEL_HEIGHT / 7;
+  const segmentSize = image.height / 7;
   const canvasSegmentWidth = canvasWidth / 14;
   const canvasSegmentHeight = canvasHeight / 9;
   const canvasOffset = (canvasWidth / PIXEL_WIDTH) * rowOffset;
@@ -247,19 +271,19 @@ function paintImageSegment(image, rowIndex, rowOffset) {
   if (rowIndex === 0) {
     ctx.drawImage(image,
       0, 0,
-      MATCH_PIXEL_WIDTH, segmentSize * 2,
+      image.width, segmentSize * 2,
       canvasOffset, Math.floor(canvasSegmentHeight),
       canvasSegmentWidth * 6, Math.ceil(canvasSegmentHeight * 2));
   } else if (rowIndex === 1) {
     ctx.drawImage(image,
       0, segmentSize * 2,
-      MATCH_PIXEL_WIDTH, segmentSize * 3,
+      image.width, segmentSize * 3,
       canvasOffset, Math.floor(canvasSegmentHeight * 3),
       canvasSegmentWidth * 6, Math.ceil(canvasSegmentHeight * 3));
   } else {
     ctx.drawImage(image,
       0, segmentSize * 5,
-      MATCH_PIXEL_WIDTH, segmentSize * 2,
+      image.width, segmentSize * 2,
       canvasOffset, Math.floor(canvasSegmentHeight * 6),
       canvasSegmentWidth * 6, Math.ceil(canvasSegmentHeight * 2));
   }
@@ -268,7 +292,7 @@ function paintImageSegment(image, rowIndex, rowOffset) {
 function paintPrize(image, heightOffset) {
   const minY = (canvasHeight / 2) - (((canvasHeight / PIXEL_HEIGHT) * PRIZE_PIXEL_HEIGHT) / 2);
 
-  const xCord = (canvasWidth / 2) - (PRIZE_PIXEL_WIDTH / 2);
+  const xCord = (canvasWidth / 2) - ((PRIZE_PIXEL_WIDTH * (canvasWidth / PIXEL_WIDTH)) / 2);
   const yCord = Math.max((canvasHeight / PIXEL_HEIGHT) * heightOffset, minY);
   const destWidth = (canvasWidth / PIXEL_WIDTH) * PRIZE_PIXEL_WIDTH;
   const destHeight = (canvasHeight / PIXEL_HEIGHT) * PRIZE_PIXEL_HEIGHT;
@@ -284,7 +308,10 @@ function render() {
   ctx.drawImage(stage, 0, 0, canvasWidth, canvasHeight);
 
   for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
-    const rowOffset = rowOffsets[rowIndex];
+    let rowOffset = rowOffsets[rowIndex];
+    if (rowIndex === currentRowIndex) {
+      rowOffset += shakeOffset;
+    }
     const rowModOffset = rowOffset % REPEAT_SIZE;
 
     // The idea here is to repeat the rendering to ensure there is always something on screen.
@@ -292,7 +319,7 @@ function render() {
     for (let renderRep = -1; renderRep <= 1; renderRep++) {
       for (let matchIndex = 0; matchIndex < matchData.length; matchIndex++) {
         const beforeOffset = rowModOffset + (renderRep * REPEAT_SIZE) + RENDER_OFFSET;
-        const imageOffset = IMAGE_OFFSET * matchIndex;
+        let imageOffset = IMAGE_OFFSET * matchIndex;
         paintImageSegment(matchData[matchIndex].image, rowIndex, beforeOffset + imageOffset);
       }
     }
@@ -301,18 +328,20 @@ function render() {
   const border = imageMap.get('border');
   ctx.drawImage(border, 0, 0, canvasWidth, canvasHeight);
 
-  if (isAwardingPrize) {
+  if (prizeId) {
     paintPrize(imageMap.get(prizeId), prizeLocation);
   }
 }
 
 function updateState(timePassed) {
+  // Handle rotation
   for (let rowIndex = 0; rowIndex < 3; rowIndex++) {
     let newOffset = rowOffsets[rowIndex];
     newOffset += (rowSpeeds[rowIndex] * timePassed);
     rowOffsets[rowIndex] = newOffset;
   }
 
+  // Handle slowing and stopping
   if (isSlowing) {
     let shouldStop = false;
     if (rowSpeeds[currentRowIndex] < 0 && rowOffsets[currentRowIndex] < slowDestination) {
@@ -322,9 +351,28 @@ function updateState(timePassed) {
     }
 
     if (shouldStop) {
+      playSfx('stop');
       isSlowing = false;
+      isShaking = true;
       rowOffsets[currentRowIndex] = slowDestination; // Put it at the exact right spot
       rowSpeeds[currentRowIndex] = 0;
+    }
+  } else if (isShaking) {
+    // Handle row shaking
+    shakeTime += timePassed;
+
+    // We want a specific number of osselations in the total shake time
+    // Math.sin((shakeTime / Math.PI) * 10) would get 1 osselations in 1ms
+    // Math.sin((shakeTime / Math.PI) * 20) would get 2 osselations in 1ms
+    shakeOffset = Math.sin(((shakeTime / Math.PI) * 20) / SHAKE_TIME_MS) * SHAKE_AMPLITUDE;
+    if (currentRowIndex % 2 == 0) {
+      shakeOffset *= -1;
+    }
+
+    if (shakeTime > SHAKE_TIME_MS) {
+      isShaking = false;
+      shakeTime = 0;
+      shakeOffset = 0;
 
       if (currentRowIndex < 2) {
         currentRowIndex++;
@@ -332,13 +380,33 @@ function updateState(timePassed) {
         handleEndGame();
       }
     }
-  }
-
-  if (isAwardingPrize) {
+  } else if (isAwardingPrize) {
+    // Handle the prize display
     prizeLocation += timePassed * PRIZE_SPEED;
     prizeTime += timePassed;
 
-    if (prizeTime > PRIZE_TIME_ON_SCREEN_MS) {
+    if (prizeTime > PRIZE_SOUND_DELAY) {
+      isAwardingPrize = false;
+      isPlayingPrizeSounds = true;
+    }
+  } else if (isPlayingPrizeSounds) {
+    prizeSoundTime += timePassed;
+
+    const soundIter = Math.floor(prizeSoundTime / PRIZE_TIME_PER_COUNT_MS);
+    if (soundIter < prizeSoundCount) {
+      if (soundIter >= prizeSoundsPlayed) {
+        prizeSoundsPlayed++;
+        playSfx('one_up');
+      }
+    } else {
+      isPlayingPrizeSounds = false;
+      endGamePause = true;
+    }
+  } else if (endGamePause) {
+    // Handle loss pause
+    lossPauseTime += timePassed
+
+    if (lossPauseTime > END_GAME_PAUSE_MS) {
       resetGame();
     }
   }
@@ -346,12 +414,16 @@ function updateState(timePassed) {
 
 function handleEndGame() {
   let matches = true;
+  let currentImageId = null;
   let currentPrizeId = null;
+  let currentPrizeSoundCount = null;
   for (let match of rowMatches) {
-    if (!currentPrizeId) {
+    if (!currentImageId) {
+      currentImageId = match.imageId;
       currentPrizeId = match.prizeId;
+      currentPrizeSoundCount = match.soundCount;
     } else {
-      if (match.prizeId !== currentPrizeId) {
+      if (match.imageId !== currentImageId) {
         matches = false;
         break;
       }
@@ -359,17 +431,19 @@ function handleEndGame() {
   }
 
   if (matches) {
+    console.log(`Match with prize ${currentPrizeId}`);
     isAwardingPrize = true;
     prizeId = currentPrizeId;
+    prizeSoundCount = currentPrizeSoundCount;
     prizeLocation = PIXEL_HEIGHT;
   } else {
-    // TODO: Pause a bit
-    resetGame();    
+    playSfx('no_match');
+    endGamePause = true;
   }
 }
 
 function interact() {
-  if (isSlowing) {
+  if (isSlowing || isShaking || isAwardingPrize || endGamePause) {
     return;
   }
 
@@ -383,15 +457,12 @@ function interact() {
   const rowBase = offsetWithoutRenderOffset - (offsetWithoutRenderOffset % REPEAT_SIZE);
   let nextIndex;
 
-  // TODO: Revert
   if (rowSpeeds[currentRowIndex] < 0) { // If moving left
     nextIndex = Math.floor(rowOffset / IMAGE_OFFSET); // negative index
-    //nextIndex = 0;
     slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
-    nextIndex += 4;
+    nextIndex += matchData.length;
   } else {
-    nextIndex = (Math.ceil(rowOffset / IMAGE_OFFSET) + 1) % 4;
-    //nextIndex = 0;
+    nextIndex = (Math.ceil(rowOffset / IMAGE_OFFSET) + 1) % matchData.length;
     slowDestination = nextIndex * IMAGE_OFFSET + rowBase;
     if (slowDestination < offsetWithoutRenderOffset) {
       slowDestination += REPEAT_SIZE;
@@ -399,8 +470,13 @@ function interact() {
   }
 
   nextIndex++;
-  nextIndex %= 4;
+  nextIndex %= matchData.length;
   rowMatches[currentRowIndex] = matchData[nextIndex];
+
+  // Stop the pmeter sond if stopping the last row
+  if (currentRowIndex === 2) {
+    stopSound('pmeter_loop');
+  }
 }
 
 function gameRender(newTimestamp) {
@@ -481,11 +557,17 @@ function connectWebsocket() {
   });
   
   websocket.addEventListener('close', (event) => {
-    setError(`Received websocket close from Twitch with code ${event.code} and reason ${event.reason} (try refreshing the page)`);
     clearTimeout(websocketTimeout);
     websocketTimeoutSeconds = null;
     websocketTimeout = null;
     websocketSessionId = null;
+
+    if (event.code === 1006) {
+      console.log('Received websocket close with code 1006. Trying reconnect.');
+      connectWebsocket();
+    } else {
+      setError(`Received websocket close from Twitch with code ${event.code} and reason ${event.reason} (try refreshing the page)`);
+    }
   });
   
   websocket.addEventListener('message', (event) => {
@@ -566,43 +648,6 @@ function subscribeToRedeems() {
   });
 }
 
-function userAuthCompleteCallback() {
-  document.getElementById('authDiv').style.display = 'none';
-  requestAccessToken();
-}
-
-function requestDeviceCode() {
-  const formData = new FormData();
-  formData.set('client_id', twitchAppClientId);
-  formData.set('scopes', 'channel:read:redemptions');
-
-  fetch('https://id.twitch.tv/oauth2/device', {
-    method: 'POST',
-    body: formData,
-    headers: {
-      'Accept': 'application/json'
-    }
-  }).then((resp) => {
-    return resp.json();
-  }).then((respJson) => {
-    if (respJson.status) {
-      if (respJson.status === 400 && respJson.message === 'authorization_pending') {
-        setError(`You need to authorize the app in the other tab.`);
-      } else {
-        setError(`Request to get Twitch device code failed with: ${respJson.message}`);
-      }
-    } else {
-      deviceCode = respJson.device_code;
-
-      document.getElementById('userAuthComplete').addEventListener('click', userAuthCompleteCallback);
-      document.getElementById('authTwitchAnchor').href = respJson.verification_uri;
-      document.getElementById('authDiv').style.display = '';
-    }
-  }).catch((e) => {
-    setError(`Request to get Twitch auth failed with: ${e.message}`);
-  });
-}
-
 function requestAccessToken() {
   const formData = new FormData();
   formData.set('client_id', twitchAppClientId);
@@ -619,7 +664,9 @@ function requestAccessToken() {
   }).then((resp) => {
     return resp.json();
   }).then((respJson) => {
-    if (respJson.status) {
+    if (respJson.status && respJson.message === 'authorization_pending') {
+      setError(`You need to accept the Twitch auth using auth.html. Requesting an access token failing with 'authorization_pending'`);
+    } else if (respJson.status) {
       setError(`Request to get Twitch auth token failed with: ${respJson.message}`);
     } else {
       clearError();
@@ -632,8 +679,6 @@ function requestAccessToken() {
       localStorage.setItem('smb3AccessTokenExpireTime', timeNow + (respJson.expires_in * 1000));
       localStorage.setItem('smb3RefreshToken', refreshToken);
       localStorage.setItem('smb3RefreshTokenExpireTime', timeNow + refreshTokenExpireTime); // Not in response
-
-      document.getElementById('authDiv').style.display = '';
 
       getTwitchUserId();
     }
@@ -673,13 +718,18 @@ function refreshAccessToken() {
 
 if (twitchEnabled) {
   // Try to load existing tokens up
+  const deviceCodeStorage = localStorage.getItem('smb3DeviceCode');
+  const deviceCodeExpireTimeStorage = localStorage.getItem('smb3DeviceCodeExpireTime');
   const refreshTokenStorage = localStorage.getItem('smb3RefreshToken');
   const refreshTokenTimeStorage = localStorage.getItem('smb3RefreshTokenExpireTime');
   const accessTokenStorage = localStorage.getItem('smb3AccessToken');
   const accessTokenExpireTimeStorage = localStorage.getItem('smb3AccessTokenExpireTime');
 
+  // Only assign the values if they are not expired
   const currentTime = new Date().getTime();
-
+  if (deviceCodeStorage && deviceCodeExpireTimeStorage && currentTime < Number(deviceCodeExpireTimeStorage)) {
+    deviceCode = deviceCodeStorage;
+  }
   if (refreshTokenStorage && refreshTokenTimeStorage && currentTime < Number(refreshTokenTimeStorage)) {
     refreshToken = refreshTokenStorage;
   }
@@ -692,7 +742,13 @@ if (twitchEnabled) {
     getTwitchUserId();
   } else if (refreshToken) {
     refreshAccessToken();
+  } else if (deviceCode) {
+    requestAccessToken();
   } else {
-    requestDeviceCode();
+    if (!deviceCodeStorage) {
+      setError('There is no device code in local storage, so you need to open auth.html');
+    } else {
+      setError('Your device code authorization expired, so you need to open auth.html');
+    }
   }
 }

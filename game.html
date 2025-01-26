@@ -2,18 +2,16 @@
 <html style="width: 100%; height: 100%">
   <body style="width: 100%; height: 100%; margin: 0; overflow: hidden;">
     <div id="errorDiv" style="color: red"></div>
-    <div id="authDiv" style="display: none">
-      <div>To authorize this app for Twitch, click this link.</div>
-      <a id="authTwitchAnchor" target="_blank" rel="noopener noreferrer">Click here (opens a new tab)</a>
-      <button id="userAuthComplete" type="button">Click here when complete</button>
-    </div>
-    <div id="pressSpace" style="width:100%; height:100%;">Press space or click to start (browser audio requirement)</div>
+    <div id="pressSpace">Browser requires an interaction to play audio. Press space or click to start, or disable sound and music.</div>
     <canvas id="canvas" display="none"></canvas>
     <span style="display: none">
       <audio id="music_loop" src="audio/music_loop.mp3" preload="auto" loop="true"></audio>
+      <audio id="pmeter_loop" src="audio/pmeter_loop.mp3" preload="auto" loop="true"></audio>
+      <audio id="select" src="audio/select.wav" preload="auto"></audio>
+      <audio id="stop" src="audio/stop.wav" preload="auto"></audio>
       <audio id="one_up" src="audio/1-up.wav" preload="auto"></audio>
-      <audio id="match" src="audio/match.wav" preload="auto"></audio>
       <audio id="no_match" src="audio/no_match.wav" preload="auto"></audio>
+      <audio id="empty" src="audio/empty.wav" preload="auto"></audio>
       <img id="background" src="img/background.png"></img>
       <img id="border" src="img/border.png"></img>
       <img id="mushroom" src="img/mushroom.png"></img>
@@ -23,6 +21,7 @@
       <img id="3up" src="img/3up.png"></img>
       <img id="5up" src="img/5up.png"></img>
     </span>
-    <script type="text/javascript" src="script.js"></script>
+    <script type="text/javascript" src="config.js"></script>
+    <script type="text/javascript" src="game.js"></script>
   </body>
 </html>
