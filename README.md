@@ -12,6 +12,8 @@ git clone https://github.com/toastplusplus/smb3roulette.git
 
 Open game.html, and press space or click to stop one of the roulette wheels.
 
+It will make you click or press space to play, as most browsers won't let web pages play sounds without interacting (OBS does not require this).
+
 # Use with OBS and Twitch
 
 Make sure you can play the game normally outside of OBS first.
@@ -73,6 +75,12 @@ The easiest form of customization is to replace the images or sounds. Just repla
 The replacement images will need to be in the same aspect ratio. Make sure you use transparency, or match the background of the roulette.
 
 If you have some basic understanding of HTML and Javascript, you can also change the behavior of the roulette. At the top of game.js is an array with the roulette game's configuration.
+
+# Note on Twitch auth
+
+This was written in an intentionally primitive style, so that it requires no build, and no running application.
+
+The downside of that is that the only compatible Twitch authorization flow is device authorization. It can't store secrets safely, or receive a callback over HTTP.
 
 # Limitations
 
