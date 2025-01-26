@@ -469,7 +469,7 @@ function interact() {
     }
   }
 
-  nextIndex++;
+  nextIndex--;
   nextIndex %= matchData.length;
   rowMatches[currentRowIndex] = matchData[nextIndex];
 
