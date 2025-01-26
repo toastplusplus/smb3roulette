@@ -47,7 +47,7 @@ You'll need to set the URL to a file URL pointing to the auth.html file:
 
 ![image](doc/obs_auth.png)
 
-Opening this in Twitch will run through the Twitch authorization flow. It should only ask for permission to listen to redeems.
+Opening this in Twitch will run through the Twitch authorization flow. It should only ask for permission to listen to redeems. Do check the box to remember the machine for 30 days, unless you want to do this every time.
 
 ![image](doc/auth_example.png)
 
