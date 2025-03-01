@@ -470,6 +470,9 @@ function interact() {
   }
 
   nextIndex--;
+  if (nextIndex == -1) {
+    nextIndex = matchData.length - 1;
+  }
   nextIndex %= matchData.length;
   rowMatches[currentRowIndex] = matchData[nextIndex];
 
@@ -562,7 +565,7 @@ function connectWebsocket() {
     websocketTimeout = null;
     websocketSessionId = null;
 
-    if (event.code === 1006) {
+    if (event.code === 1006 || event.code === 1000) {
       console.log('Received websocket close with code 1006. Trying reconnect.');
       connectWebsocket();
     } else {
